@@ -133,27 +133,27 @@ def _charset(
     jdt: Path,
     text_offset: int,
 ) -> str:
-    declarations: list[tuple[bytes, Path, int]] = [
-        (b"\x01" + value.lstrip(b"\x01"), jhr, offset)
-        for lo, value, offset in fields
-        if lo == 2000
+    declarations: list[tuple[bytes, Path, int, bool]] = [
+        (value, jhr, offset, True) for lo, value, offset in fields if lo == 2000
     ]
-    declarations.append((body, jdt, text_offset))
+    declarations.append((body, jdt, text_offset, False))
     selected: str | None = None
     identity: str | None = None
     try:
         fallback = detect_charset(b"", options.fallback_charset)
     except (ValueError, LookupError) as error:
         _fail(jhr, 0, error)
-    for raw, path, offset in declarations:
+    for raw, path, offset, is_subfield in declarations:
+        prefix = rb"(?:^|\x01)" if is_subfield else rb"\x01"
         for match in re.finditer(
-            rb"\x01(?:CHRS|CHARSET):\s*([^\s\x00\x01]+)", raw, re.IGNORECASE
+            prefix + rb"(?:CHRS|CHARSET):\s*([^\s\x00\x01]+)", raw, re.IGNORECASE
         ):
-            charset = detect_charset(match[0], options.fallback_charset)
+            declaration = b"\x01" + match[0].lstrip(b"\x01")
+            charset = detect_charset(declaration, options.fallback_charset)
             # Unknown declarations use core fallback, but still must agree by name.
             name = match[1].decode("ascii", errors="replace").upper()
-            cp = codecs.lookup(detect_charset(match[0], "CP850")).name
-            utf = codecs.lookup(detect_charset(match[0], "UTF-8")).name
+            cp = codecs.lookup(detect_charset(declaration, "CP850")).name
+            utf = codecs.lookup(detect_charset(declaration, "UTF-8")).name
             key = cp if cp == utf else "unknown:" + name
             _require(
                 identity is None or identity == key,
@@ -180,7 +180,10 @@ def _unique_controls(controls: MessageControlLines, path: Path, offset: int) -> 
 
 
 class JamReader:
-    """Read indexed messages atomically into memory, in message-number order."""
+    """Validate all indexed records before returning messages in number order.
+
+    The files must be stable; reading them separately does not create a snapshot.
+    """
 
     def read(
         self, path: str | PathLike[str], options: ReaderOptions | None = None

@@ -60,6 +60,13 @@ def main() -> None:
         ):
             assert (source / name).is_file(), name
         assert not (source / "uv.lock").exists(), "Development lock leaked into sdist"
+        config = tomllib.loads((source / "pyproject.toml").read_text())
+        assert "sources" not in config.get("tool", {}).get("uv", {}), (
+            "Development sources leaked into sdist pyproject.toml"
+        )
+        assert not (source / "uv.toml").exists(), (
+            "Development uv config leaked into sdist"
+        )
         package_info = email.message_from_bytes((source / "PKG-INFO").read_bytes())
         assert package_info["Name"] == project["name"]
         assert package_info["Version"] == project["version"]

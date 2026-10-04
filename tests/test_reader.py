@@ -588,3 +588,18 @@ def test_deleted_records_still_have_checked_bounds(tmp_path: Path) -> None:
     base = one(tmp_path, attributes=0x80000000)
     patch(base, ".JHR", 1088, u32(1))
     failure(base, ".JDT", 0)
+
+
+@pytest.mark.parametrize("prefix", [b"", b"\x01", b"\x01\x01"])
+def test_charset_conflict_offset_uses_stored_bytes(
+    tmp_path: Path, prefix: bytes
+) -> None:
+    payload = prefix + b"CHRS: UTF-8 4\x01CHARSET: CP850"
+    base = one(tmp_path, subfield(2000, payload))
+    failure(base, ".JHR", 1108 + payload.index(b"\x01CHARSET"))
+
+
+def test_charset_conflict_offset_with_leading_soh(tmp_path: Path) -> None:
+    first = subfield(2000, b"CHRS: UTF-8 4")
+    second = subfield(2000, b"\x01\x01CHARSET: CP850")
+    failure(one(tmp_path, first + second), ".JHR", 1108 + len(first) + 1)

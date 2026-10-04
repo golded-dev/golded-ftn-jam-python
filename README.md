@@ -81,7 +81,9 @@ uv run python scripts/verify_distribution.py
 ```
 
 uv uses the sibling `../golded-ftn` checkout during development. Published metadata
-contains only `golded-ftn>=1.0.0,<2`. The development lock is excluded from sdist.
+contains only `golded-ftn>=1.0.0,<2`. The sdist build hook removes `tool.uv.sources`
+from the packed `pyproject.toml`; the development lock is also excluded.
+Unpacked sources use the public dependency constraint.
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [release checks](docs/release.md).
 
 ## Format references and credits
