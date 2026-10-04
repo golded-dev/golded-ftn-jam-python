@@ -81,7 +81,7 @@ uv run python scripts/verify_distribution.py
 ```
 
 uv uses the sibling `../golded-ftn` checkout during development. Published metadata
-contains only `golded-ftn>=1.0.0,<2`. The sdist build hook removes `tool.uv.sources`
+contains only `golded-ftn>=1.1.0,<2`. The sdist build hook removes `tool.uv.sources`
 from the packed `pyproject.toml`; the development lock is also excluded.
 Unpacked sources use the public dependency constraint.
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [release checks](docs/release.md).
@@ -96,3 +96,31 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [release checks](docs/release.md).
 JAM(mbp) - Copyright 1993 Joaquim Homrighausen, Andrew Milner, Mats Birch, Mats Wallin. ALL RIGHTS RESERVED.
 
 The package code is MIT licensed; the JAM specification has its own terms.
+
+## Archive mode
+
+Strict reading remains the default. Archive mode requires a report callback:
+
+```python
+from golded_ftn import ReaderIssue, ReaderOptions
+
+issues: list[ReaderIssue] = []
+options = ReaderOptions(archive_mode=True, on_issue=issues.append)
+# Pass options to JamReader().read(source, options).
+```
+
+Issues carry `recovered`, `skipped` or `stopped`, the actual filename, record
+identity and physical offset. Their detail contains no message contents. A stop
+means the traversal is incomplete; a validated prefix may still be returned.
+Multiple issues can describe one record, including recovery followed by a skip.
+Filesystem errors and callback exceptions propagate. Files must remain stable.
+
+Bounded fields exceeding JAM's specification limits are retained and reported.
+Malformed TZUTC metadata is retained without interpretation. Distinct PID, FLAGS
+and TZUTC subfields stay in source order. Conflicting names, subjects, IDs or
+charset declarations are skipped rather than guessed. Failed records are skipped
+using the next fixed index slot; reused header offsets stop traversal.
+
+If declared ASCII cannot decode a payload, the configured fallback is tried
+strictly and reported. The original charset control stays unchanged. Other
+decoding failures are skipped; there is no lossy decoding or mojibake repair.

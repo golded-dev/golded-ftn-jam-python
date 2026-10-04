@@ -10,13 +10,14 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from os import PathLike
 from pathlib import Path
-from typing import NoReturn
+from typing import Literal, NoReturn
 
 from golded_ftn import (
     MessageControlLines,
     MessageProvenance,
     ParsedMessage,
     ParserException,
+    ReaderIssue,
     ReaderOptions,
     detect_charset,
     parse_body,
@@ -34,9 +35,16 @@ _CONTROL_NAMES = {4: "MSGID", 5: "REPLY", 7: "PID", 2003: "FLAGS", 2004: "TZUTC"
 _KNOWN = {0, 1, 2, 3, 4, 5, 6, 7, 2000, 2001, 2002, 2003, 2004}
 
 
+class _JamError(ParserException):
+    def __init__(self, message: str, path: Path, offset: int) -> None:
+        super().__init__(message)
+        self.path = path
+        self.offset = offset
+
+
 def _fail(path: Path, offset: int, error: Exception) -> NoReturn:
-    raise ParserException(
-        f"Cannot parse JAM file {path} at offset {offset}: {error}"
+    raise _JamError(
+        f"Cannot parse JAM file {path} at offset {offset}: {error}", path, offset
     ) from error
 
 
@@ -75,8 +83,54 @@ def _file(base: Path, suffix: str) -> Path:
     return path
 
 
+def _report(
+    options: ReaderOptions,
+    path: Path,
+    offset: int,
+    msgno: int | None,
+    action: Literal["recovered", "skipped", "stopped"],
+    code: str,
+    detail: str,
+) -> None:
+    if options.on_issue is not None:
+        options.on_issue(
+            ReaderIssue(
+                source_type="jam",
+                source_path=str(path),
+                source_offset=offset,
+                source_id=str(msgno) if msgno is not None else None,
+                action=action,
+                code=code,
+                detail=detail,
+            )
+        )
+
+
+def _error_issue(
+    options: ReaderOptions,
+    error: ParserException,
+    path: Path,
+    offset: int,
+    msgno: int | None,
+    action: Literal["recovered", "skipped", "stopped"],
+) -> None:
+    if isinstance(error, _JamError):
+        path, offset = error.path, error.offset
+    _report(
+        options,
+        path,
+        offset,
+        msgno,
+        action,
+        "record_parse_error",
+        "Record failed validation or decoding"
+        if action == "skipped"
+        else "Area structure is ambiguous or incomplete",
+    )
+
+
 def _subfields(
-    data: bytes, start: int, length: int, path: Path
+    data: bytes, start: int, length: int, path: Path, options: ReaderOptions, msgno: int
 ) -> list[tuple[int, bytes, int]]:
     end = start + length
     _slice(data, start, length, path)
@@ -89,15 +143,40 @@ def _subfields(
         _require(size <= end - payload, path, offset, "Subfield exceeds declared block")
         if hi == 0 and lo in _KNOWN:
             maximum = 100 if lo <= 6 else 40 if lo == 7 else 255 if lo == 2000 else None
+            if maximum is not None and size > maximum and options.archive_mode:
+                _report(
+                    options,
+                    path,
+                    offset,
+                    msgno,
+                    "recovered",
+                    "subfield_length_exceeded",
+                    f"Subfield {lo} exceeds specification length; kept bounded payload",
+                )
             _require(
-                maximum is None or size <= maximum,
+                options.archive_mode or maximum is None or size <= maximum,
                 path,
                 offset,
                 f"Subfield {lo} exceeds specification maximum length",
             )
             if lo == 2004:
+                if (
+                    options.archive_mode
+                    and re.fullmatch(rb"[+-]?[0-9]{4}", data[payload : payload + size])
+                    is None
+                ):
+                    _report(
+                        options,
+                        path,
+                        payload,
+                        msgno,
+                        "recovered",
+                        "invalid_tzutc",
+                        "Malformed TZUTC metadata retained without interpretation",
+                    )
                 _require(
-                    re.fullmatch(rb"[+-]?[0-9]{4}", data[payload : payload + size])
+                    options.archive_mode
+                    or re.fullmatch(rb"[+-]?[0-9]{4}", data[payload : payload + size])
                     is not None,
                     path,
                     payload,
@@ -108,9 +187,39 @@ def _subfields(
     return result
 
 
-def _decode(value: bytes, charset: str, path: Path, offset: int) -> str:
+def _decode(
+    value: bytes,
+    charset: str,
+    path: Path,
+    offset: int,
+    options: ReaderOptions,
+    msgno: int,
+) -> str:
     try:
         return to_utf8(value, charset)
+    except UnicodeDecodeError as error:
+        if options.archive_mode and codecs.lookup(charset).name == "ascii":
+            try:
+                decoded = to_utf8(value, detect_charset(b"", options.fallback_charset))
+            except (ValueError, LookupError) as fallback_error:
+                _fail(
+                    path,
+                    offset + fallback_error.start
+                    if isinstance(fallback_error, UnicodeDecodeError)
+                    else offset,
+                    fallback_error,
+                )
+            _report(
+                options,
+                path,
+                offset + error.start,
+                msgno,
+                "recovered",
+                "ascii_decode_fallback",
+                "Declared ASCII cannot decode payload; configured fallback used",
+            )
+            return decoded
+        _fail(path, offset + error.start, error)
     except (ValueError, LookupError) as error:
         _fail(path, offset, error)
 
@@ -151,7 +260,7 @@ def _charset(
             declaration = b"\x01" + match[0].lstrip(b"\x01")
             charset = detect_charset(declaration, options.fallback_charset)
             # Unknown declarations use core fallback, but still must agree by name.
-            name = match[1].decode("ascii", errors="replace").upper()
+            name = match[1].upper().hex()
             cp = codecs.lookup(detect_charset(declaration, "CP850")).name
             utf = codecs.lookup(detect_charset(declaration, "UTF-8")).name
             key = cp if cp == utf else "unknown:" + name
@@ -188,40 +297,78 @@ class JamReader:
     def read(
         self, path: str | PathLike[str], options: ReaderOptions | None = None
     ) -> Iterable[ParsedMessage]:
+        options = options or ReaderOptions()
         base = Path(path)
-        jhr, jdt, jdx = (_file(base, suffix) for suffix in (".JHR", ".JDT", ".JDX"))
+        try:
+            jhr, jdt, jdx = (_file(base, suffix) for suffix in (".JHR", ".JDT", ".JDX"))
+        except ParserException as error:
+            if not options.archive_mode:
+                raise
+            _error_issue(options, error, base, 0, None, "stopped")
+            return ()
         headers, texts, index = jhr.read_bytes(), jdt.read_bytes(), jdx.read_bytes()
-        _slice(headers, 0, 1024, jhr)
-        _require(headers[:4] == b"JAM\0", jhr, 0, "Invalid area signature")
-        base_number = int.from_bytes(headers[20:24], "little")
-        _require(base_number >= 1, jhr, 20, "BaseMsgNum must be positive")
-        _require(
-            len(index) % 8 == 0, jdx, len(index) // 8 * 8, "Truncated index record"
-        )
-        _require(
-            base_number + len(index) // 8 - 1 <= 0xFFFFFFFF,
-            jdx,
-            0,
-            "Message number exceeds unsigned 32-bit range",
-        )
+        try:
+            _slice(headers, 0, 1024, jhr)
+            _require(headers[:4] == b"JAM\0", jhr, 0, "Invalid area signature")
+            base_number = int.from_bytes(headers[20:24], "little")
+            _require(base_number >= 1, jhr, 20, "BaseMsgNum must be positive")
+            _require(
+                len(index) % 8 == 0, jdx, len(index) // 8 * 8, "Truncated index record"
+            )
+            _require(
+                base_number + len(index) // 8 - 1 <= 0xFFFFFFFF,
+                jdx,
+                0,
+                "Message number exceeds unsigned 32-bit range",
+            )
+        except ParserException as error:
+            if not options.archive_mode:
+                raise
+            _error_issue(options, error, jhr, 0, None, "stopped")
+            return ()
         used: set[int] = set()
         result: list[ParsedMessage] = []
         for position in range(len(index) // 8):
             crc, offset = _INDEX.unpack_from(index, position * 8)
             if crc == offset == 0xFFFFFFFF:
                 continue
+            msgno = base_number + position
+            if options.archive_mode and offset in used:
+                _report(
+                    options,
+                    jdx,
+                    position * 8 + 4,
+                    msgno,
+                    "stopped",
+                    "reused_header_offset",
+                    "Index reuses a header offset",
+                )
+                break
             _require(offset not in used, jdx, position * 8 + 4, "Reused header offset")
             used.add(offset)
-            _require(offset >= 1024, jhr, offset, "Header points into area header")
-            message = self._message(
-                headers,
-                texts,
-                jhr,
-                jdt,
-                offset,
-                base_number + position,
-                options or ReaderOptions(),
+            pending: list[ReaderIssue] = []
+            local_options = (
+                replace(options, on_issue=pending.append)
+                if options.archive_mode
+                else options
             )
+            failure: ParserException | None = None
+            try:
+                _require(offset >= 1024, jhr, offset, "Header points into area header")
+                message = self._message(
+                    headers, texts, jhr, jdt, offset, msgno, local_options
+                )
+            except ParserException as error:
+                if not options.archive_mode:
+                    raise
+                failure = error
+                message = None
+            # Flush outside parser catches so a failing reporter aborts the read.
+            for issue in pending:
+                assert options.on_issue is not None
+                options.on_issue(issue)
+            if failure is not None:
+                _error_issue(options, failure, jhr, offset, msgno, "skipped")
             if message is not None:
                 result.append(message)
         return tuple(result)
@@ -243,7 +390,7 @@ class JamReader:
         _require(
             words[10] == msgno, jhr, offset + 48, "Message number disagrees with index"
         )
-        fields = _subfields(headers, offset + 76, words[0], jhr)
+        fields = _subfields(headers, offset + 76, words[0], jhr, options, msgno)
         text_offset, text_length = words[13:15]
         raw_body = _slice(texts, text_offset, text_length, jdt)
         attributes = words[11]
@@ -259,12 +406,23 @@ class JamReader:
         values: dict[int, str] = {}
         control_text: list[str] = []
         for lo, raw, payload_offset in fields:
-            value = _decode(raw, charset, jhr, payload_offset)
+            value = _decode(raw, charset, jhr, payload_offset, options, msgno)
             if lo in {0, 1}:
                 values.setdefault(lo, value)
             elif lo not in {2000, 2001, 2002}:
+                keep_repeated = options.archive_mode and lo in {7, 2003, 2004}
+                if keep_repeated and lo in values and values[lo] != value:
+                    _report(
+                        options,
+                        jhr,
+                        payload_offset,
+                        msgno,
+                        "recovered",
+                        "repeated_control_subfield",
+                        f"Distinct subfield {lo} controls retained in source order",
+                    )
                 _require(
-                    lo not in values or values[lo] == value,
+                    keep_repeated or lo not in values or values[lo] == value,
                     jhr,
                     payload_offset,
                     f"Conflicting subfield {lo} values",
@@ -272,7 +430,7 @@ class JamReader:
                 values[lo] = value
             if lo in _CONTROL_NAMES or lo in {2000, 2001, 2002}:
                 control_text.append(_control(lo, value))
-        body = parse_body(_decode(raw_body, charset, jdt, text_offset))
+        body = parse_body(_decode(raw_body, charset, jdt, text_offset, options, msgno))
         header_controls = parse_message("\n".join(control_text))
         body_controls = parse_message(body)
         _unique_controls(header_controls, jhr, offset + 76)

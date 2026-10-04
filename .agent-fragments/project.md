@@ -15,3 +15,8 @@ distribution dependencies must use the public core constraint, never a local pat
 Edit this fragment or agent-compose.toml, then preview, build and check. Keep
 private persona sources outside distributions. Commit, push, tags and publication
 require an explicit request.
+
+Strict reading stays the default. Archive mode requires an issue callback and
+reports every recovery, skipped record and unsafe traversal stop. Keep source
+paths, identities and byte offsets in issues; keep message contents out. Callback
+failures propagate. Protect both modes with independent synthetic fixtures.
