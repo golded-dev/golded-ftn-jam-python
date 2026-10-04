@@ -1,9 +1,16 @@
 # golded-ftn-jam
 
+Repository: [`golded-ftn-jam-python`](https://github.com/golded-dev/golded-ftn-jam-python).
+The distribution remains `golded-ftn-jam`; imports use `golded_ftn_jam`.
+The source is public on GitHub. This package has not been released on PyPI.
+
 Read JAM revision 1 message areas through the `golded-ftn` models. Python 3.12+.
 
 ```sh
-pip install golded-ftn-jam
+git clone https://github.com/golded-dev/golded-ftn-python.git
+git clone https://github.com/golded-dev/golded-ftn-jam-python.git
+cd golded-ftn-jam-python
+uv sync --locked
 ```
 
 ```python
@@ -80,7 +87,7 @@ uv run twine check dist/*
 uv run python scripts/verify_distribution.py
 ```
 
-uv uses the sibling `../golded-ftn` checkout during development. Published metadata
+uv uses the sibling `../golded-ftn-python` checkout during development. Published metadata
 contains only `golded-ftn>=1.1.0,<2`. The sdist build hook removes `tool.uv.sources`
 from the packed `pyproject.toml`; the development lock is also excluded.
 Unpacked sources use the public dependency constraint.
