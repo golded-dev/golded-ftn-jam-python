@@ -209,9 +209,12 @@ def test_deterministic_process_lock_timeout(tmp_path: Path) -> None:
         [
             sys.executable,
             "-c",
-            "import fcntl,sys; f=open(sys.argv[1],'r+b'); "
-            "fcntl.lockf(f,fcntl.LOCK_EX,1,0); print('locked',flush=True); "
-            "sys.stdin.readline()",
+            "import os,sys\nf=open(sys.argv[1],'r+b')\n"
+            "if os.name == 'nt':\n"
+            " import msvcrt\n msvcrt.locking(f.fileno(),msvcrt.LK_NBLCK,1)\n"
+            "else:\n"
+            " import fcntl\n fcntl.lockf(f,fcntl.LOCK_EX,1,0)\n"
+            "print('locked',flush=True)\nsys.stdin.readline()",
             str(base) + ".JHR",
         ],
         stdin=subprocess.PIPE,
