@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0 — 2026-10-05
+
+- Add offline create/read/append/update/delete sessions, message revisions, record locks and rollback.
+- Preserve raw subfields and maintain JAM indices, CRCs and counters.
+- GoldED coexistence remains disabled pending build-specific integration tests.
+
+- Replace controls and MSGID across JHR/JDT placements; preserve omitted structured fields and reject conflicting controls.
+
 ## 1.1.0 — Unreleased
 
 Add reported archive reading: keep bounded oversized subfields and malformed
