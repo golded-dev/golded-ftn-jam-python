@@ -23,6 +23,9 @@ The current GoldED build and integration tests are deferred.
 
 ## Local 1.2.0 release candidate — 2026-10-05
 
+This section records the checks before publication. The completed publication
+is recorded below.
+
 Verified on macOS 27.0 arm64 with CPython 3.14.6. The checkout contains
 uncommitted changes; these checks cover the working tree, not a tagged release.
 
@@ -84,3 +87,21 @@ environment. Do not store publishing credentials in this repository.
 The deterministic process-lock helper uses native `msvcrt` byte locks on
 Windows and `fcntl` record locks on POSIX. Both coordinate through an explicit
 ready signal and release request; the test does not depend on random timing.
+
+## Published 1.2.0 — 2026-10-05
+
+[PyPI](https://pypi.org/project/golded-ftn-jam/1.2.0/) and
+[GitHub](https://github.com/golded-dev/golded-ftn-jam-python/releases/tag/v1.2.0)
+now provide the reviewed wheel and sdist. The
+[publishing workflow](https://github.com/golded-dev/golded-ftn-jam-python/actions/runs/37304080739)
+passed with Trusted Publishing through `publish.yml`, environment `pypi`.
+The pending publisher became an active project publisher.
+
+Both archives were downloaded from PyPI and their SHA-256 values matched
+`RELEASE-SHA256.txt`. A fresh environment installed all five packages at 1.2.0
+from `https://pypi.org/simple`, passed `uv pip check`, and executed the four
+format CRUD examples. GoldED interoperability remains deferred.
+
+The tagged archives retain the pre-publication documentation used during their
+review. Current GitHub documentation records publication; the release tag,
+archives and checksum manifest remain unchanged.
