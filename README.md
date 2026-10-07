@@ -2,12 +2,12 @@
 
 Repository: [`golded-ftn-jam-python`](https://github.com/golded-dev/golded-ftn-jam-python).
 The distribution remains `golded-ftn-jam`; imports use `golded_ftn_jam`.
-The source is public on GitHub. [Version 1.2.0 is available on PyPI](https://pypi.org/project/golded-ftn-jam/1.2.0/).
+The source is public on GitHub. [Version 1.2.1 is available on PyPI](https://pypi.org/project/golded-ftn-jam/1.2.1/).
 
 Install with Python 3.12 or newer:
 
 ```sh
-python -m pip install golded-ftn-jam==1.2.0
+python -m pip install golded-ftn-jam==1.2.1
 ```
 
 Read and edit JAM revision 1 areas through the `golded-ftn` models. Python 3.12+.
@@ -195,8 +195,9 @@ This provides no process-kill or power-loss transaction guarantee.
 
 GoldED coexistence is disabled on every platform (`concurrent=True` is refused).
 macOS/Linux use POSIX record locking. Core provides Windows offline record locks
-and I/O, but this checkout has only been tested on macOS. Windows and Linux
-execution and GoldED interoperability remain unverified. Keep GoldED closed and
+and I/O. CI passed on Windows and macOS with Python 3.12/3.14 and Linux
+with Python 3.12/3.13/3.14. Version 1.2.1 opens JDT/JDX descriptors in binary
+mode on Windows. GoldED interoperability remains unverified. Keep GoldED closed and
 avoid direct file access while these sessions operate. GoldED builds and
 integration tests are deferred.
 
