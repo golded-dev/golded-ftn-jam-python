@@ -353,7 +353,7 @@ wheels = [
 
 [[package]]
 name = "golded-ftn"
-version = "1.2.0"
+version = "1.2.2"
 source = { editable = "../golded-ftn-python" }
 
 [package.metadata]
@@ -369,7 +369,7 @@ dev = [
 
 [[package]]
 name = "golded-ftn-jam"
-version = "1.2.0"
+version = "1.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "golded-ftn" },

@@ -23,6 +23,42 @@ from test_reader import one, subfield
 from golded_ftn_jam import JamWriter
 
 
+@pytest.mark.parametrize(
+    "body,raw_body,decoded",
+    [
+        ("one\ntwo", b"one\rtwo", "one\ntwo"),
+        ("one\r\ntwo", b"one\rtwo", "one\ntwo"),
+        ("one\x1atwo", b"one\x1atwo", "one\x1atwo"),
+    ],
+)
+def test_binary_index_and_body_survive_session_reopen(
+    tmp_path: Path, body: str, raw_body: bytes, decoded: str
+) -> None:
+    base = tmp_path / "binary"
+    writer = JamWriter()
+    writer.create(base)
+    with writer.open(base) as session:
+        receipt = session.append(
+            OutgoingMessage(
+                from_name="Alice", to_name="Bob", subject="Binary", body_text=body
+            )
+        )
+    # Literal Bob CRC and first header offset: LF is binary data in this index.
+    assert Path(str(base) + ".JDX").read_bytes() == bytes.fromhex("bf4e340a00040000")
+    assert Path(str(base) + ".JDT").read_bytes() == raw_body
+    with writer.open(base) as session:
+        saved = session.read(1)
+        assert saved.message.body_text == decoded
+        assert saved.revision == receipt.revision
+        changed = session.update(
+            saved.identity, MessagePatch(body_text=decoded + "\nend"), saved.revision
+        )
+    with writer.open(base) as session:
+        saved = session.read(1)
+        assert saved.message.body_text == decoded + "\nend"
+        assert saved.revision == changed.revision
+
+
 def message(body: str = "text") -> OutgoingMessage:
     return OutgoingMessage(
         from_name="sender",
@@ -32,6 +68,24 @@ def message(body: str = "text") -> OutgoingMessage:
         external_id="2:1/2 id",
         reply_to_msgno=7,
     )
+
+
+@pytest.mark.parametrize("raw_body", [b"one\ntwo", b"one\r\ntwo", b"one\x1atwo"])
+def test_literal_binary_body_preserved_by_attribute_update(
+    tmp_path: Path, raw_body: bytes
+) -> None:
+    base = one(tmp_path, body=raw_body)
+    header = Path(str(base) + ".JHR")
+    data = bytearray(header.read_bytes())
+    data[12:16] = b"\x01\x00\x00\x00"
+    header.write_bytes(data)
+    with JamWriter().open(base) as session:
+        saved = session.read(1)
+        changed = session.update(
+            saved.identity, MessagePatch(attributes_raw=0x04000000), saved.revision
+        )
+        assert session.read(1).revision == changed.revision
+    assert Path(str(base) + ".JDT").read_bytes() == raw_body
 
 
 def snapshot(base: Path) -> tuple[bytes, ...]:

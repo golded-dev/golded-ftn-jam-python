@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1 — 2026-10-07
+
+- Open JDT/JDX file descriptors in binary mode on Windows to preserve index bytes, text offsets and CTRL-Z data.
+- Add literal-byte regressions for the Bob recipient CRC and LF/CRLF/CTRL-Z body data.
+
 ## 1.2.0 — 2026-10-05
 
 - Add offline create/read/append/update/delete sessions, message revisions, record locks and rollback.

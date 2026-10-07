@@ -190,9 +190,10 @@ class JamSession:
         with locks.acquire(
             self.paths[0], timeout=self.options.lock_timeout
         ) as header_fd:
-            text_fd = os.open(self.paths[1], os.O_RDWR)
+            binary_flags = os.O_RDWR | getattr(os, "O_BINARY", 0)
+            text_fd = os.open(self.paths[1], binary_flags)
             try:
-                index_fd = os.open(self.paths[2], os.O_RDWR)
+                index_fd = os.open(self.paths[2], binary_flags)
                 try:
                     fds = header_fd, text_fd, index_fd
                     raw = tuple(
