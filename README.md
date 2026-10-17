@@ -75,7 +75,10 @@ when repeated. Header MSGID/REPLYID take precedence over matching body IDs;
 missing MSGID uses the core synthetic ID over decoded, normalized fields.
 
 Dates are naive `1970-01-01 + DateWritten seconds`, independent of the machine's
-timezone; zero means `None`. TZUTC is retained as a control line. Raw attributes,
+timezone; zero means `None`. TZUTC is retained as a control line. Writer and
+recovery sessions invert that epoch to local wall time when a valid TZUTC offset
+is present, so aware timestamps round-trip without an hour shift. The naive
+DateWritten mapping is unchanged when TZUTC is absent. Raw attributes,
 all three reply links and `.JHR` provenance are retained; zero reply links become
 `None`. Unknown area metadata stays `None`.
 
@@ -97,7 +100,7 @@ uv run python scripts/verify_distribution.py
 ```
 
 uv uses the sibling `../golded-ftn-python` checkout during development. Published metadata
-contains only `golded-ftn>=1.2.0,<2`. The sdist build hook removes `tool.uv.sources`
+contains only `golded-ftn>=1.3.0,<2`. The sdist build hook removes `tool.uv.sources`
 from the packed `pyproject.toml`; the development lock is also excluded.
 Unpacked sources use the public dependency constraint.
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [release checks](docs/release.md).
@@ -144,7 +147,10 @@ decoding failures are skipped; there is no lossy decoding or mojibake repair.
 ## Writing
 
 `JamWriter.create(base)` creates `.JHR`, `.JDT`, `.JDX` and an empty `.JLR`.
-Existing files are refused. The initial message number is 1.
+Pass `JamWriterOptions(extension_case="lower")` to create `.jhr` and friends
+instead. Open and read already use the casing that is on disk; both casings
+of the same sidecar at once are still rejected. Existing files are refused.
+The initial message number is 1.
 
 ```python
 from golded_ftn import MessagePatch, OutgoingMessage
@@ -193,7 +199,13 @@ No MSGID, routing or duplicate detection is generated. Full-file snapshots suppo
 in-place rollback during ordinary I/O failures; rollback failure poisons the session.
 This provides no process-kill or power-loss transaction guarantee.
 
-GoldED coexistence is disabled on every platform (`concurrent=True` is refused).
+`JamWriter.recovery_session(path, recovery_root=...)` holds the `.JHR` byte-0 lock
+across prepare/apply/settle and reuses that descriptor for header I/O. Recovery
+covers `.JHR`, `.JDT` and `.JDX` only; `.JLR` is never touched. Torn header or
+index bytes are restored from durable artifacts before ordinary validation.
+`concurrent=True` is accepted.
+
+GoldED coexistence remains unverified. The flag no longer refuses the session.
 macOS/Linux use POSIX record locking. Core provides Windows offline record locks
 and I/O. CI passed on Windows and macOS with Python 3.12/3.14 and Linux
 with Python 3.12/3.13/3.14. Version 1.2.1 opens JDT/JDX descriptors in binary
