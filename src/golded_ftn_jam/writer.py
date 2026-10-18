@@ -63,11 +63,7 @@ class JamWriterOptions(WriterOptions):
 
 
 def _sidecar_suffixes(options: WriterOptions | None) -> tuple[str, ...]:
-    case = (
-        options.extension_case
-        if isinstance(options, JamWriterOptions)
-        else "upper"
-    )
+    case = options.extension_case if isinstance(options, JamWriterOptions) else "upper"
     if case == "lower":
         return tuple(suffix.lower() for suffix in _SIDECARS)
     return _SIDECARS

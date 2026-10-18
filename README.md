@@ -225,3 +225,10 @@ REPLY CRCs, active count and modification counter. Its CRC seed and missing fina
 complement are confirmed by `goldlib/gall/gcrcs32.cpp::strCrc32`.
 These source checks establish layout and write semantics. They do not establish
 that a running GoldED reader refreshes safely after external changes.
+
+## Candidate 1.3.0
+
+Add recoverable sessions and explicit extension_case. Retain the JHR lock descriptor across reads and mutations; preserve raw metadata and revisions.
+
+Linux and macOS, Python 3.12–3.14, are the release targets. Windows is outside
+this candidate's test and compatibility promises. See [release preparation](docs/release.md).

@@ -125,11 +125,11 @@ def failure(base: Path, suffix: str, offset: int) -> ParserException:
 
 def test_empty_and_public_exports(tmp_path: Path) -> None:
     assert golded_ftn_jam.__all__ == [
-    "JamReader",
-    "JamSession",
-    "JamWriter",
-    "JamWriterOptions",
-]
+        "JamReader",
+        "JamSession",
+        "JamWriter",
+        "JamWriterOptions",
+    ]
     assert read(area(tmp_path)) == []
     assert hasattr(golded_ftn_jam, "JamWriter")
 

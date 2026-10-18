@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0 (unreleased)
+
+- Add recoverable sessions and explicit extension_case. Retain the JHR lock descriptor across reads and mutations; preserve raw metadata and revisions.
+
 ## 1.3.0 — 2026-10-17
 
 - Require `golded-ftn>=1.3.0,<2`.
