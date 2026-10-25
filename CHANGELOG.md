@@ -1,12 +1,11 @@
 # Changelog
 
-## 1.3.0 (unreleased)
+## 1.3.0 — 2026-10-25
 
-- Add recoverable sessions and explicit extension_case. Retain the JHR lock descriptor across reads and mutations; preserve raw metadata and revisions.
-
-## 1.3.0 — 2026-10-17
-
-- Require `golded-ftn>=1.3.0,<2`.
+- Add recoverable sessions and explicit `extension_case` handling.
+- Retain the JHR lock descriptor across reads and mutations; preserve raw
+  metadata and revisions.
+- Require `golded-ftn>=1.4.0,<2`.
 - Add `JamWriter.recovery_session` implementing `RecoverableMessageBaseWriter`.
 - Hold the `.JHR` byte-0 lock across prepare/apply/settle and reuse that descriptor for header I/O. Cover `.JHR`, `.JDT` and `.JDX`; never touch `.JLR`.
 - Recover torn header or index artifacts before ordinary JAM validation.
