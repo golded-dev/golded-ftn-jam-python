@@ -1,2 +1,2 @@
-595d310bd878105c4d932961f0d59e6a13ece2845fa6b08dcb85a1d3bb88fc31  dist/golded_ftn_jam-1.2.1-py3-none-any.whl
-2226a8079360e08d97ee235851b7851e8736ab6423ed1a2746e61c424f6bffd3  dist/golded_ftn_jam-1.2.1.tar.gz
+4739f8357d75059e1871222b58fa4b02fc1a90e85a70d02e56bb91f53a669e00  dist/golded_ftn_jam-1.3.0-py3-none-any.whl
+0e075f5c49c104ff62d3686cd6ae64d2340c63d3aef6b0302867572d17835a3f  dist/golded_ftn_jam-1.3.0.tar.gz
