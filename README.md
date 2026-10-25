@@ -2,12 +2,12 @@
 
 Repository: [`golded-ftn-jam-python`](https://github.com/golded-dev/golded-ftn-jam-python).
 The distribution remains `golded-ftn-jam`; imports use `golded_ftn_jam`.
-The source is public on GitHub. [Version 1.2.1 is available on PyPI](https://pypi.org/project/golded-ftn-jam/1.2.1/).
+The source is public on GitHub. [Version 1.3.0 is available on PyPI](https://pypi.org/project/golded-ftn-jam/1.3.0/).
 
 Install with Python 3.12 or newer:
 
 ```sh
-python -m pip install golded-ftn-jam==1.2.1
+python -m pip install golded-ftn-jam==1.3.0
 ```
 
 Read and edit JAM revision 1 areas through the `golded-ftn` models. Python 3.12+.
@@ -50,11 +50,12 @@ preserves it and creation initializes an empty file.
 The index determines message numbers and which headers are live. Index holes and
 deleted messages are skipped. Old unindexed headers are ignored. The reader
 validates signatures, revision, record boundaries, offsets, subfield lengths,
-message numbers and reused header offsets. It reads the whole area into memory
-and validates all indexed records before returning a tuple. A malformed later
-record cannot leave a caller with a partial result. Filesystem errors remain
-filesystem errors; damaged data and decoding errors raise `ParserException` with
-source path, byte offset and a chained cause.
+message numbers and reused header offsets. By default it streams indexed
+messages; pass `ReaderOptions(eager=True)` to load and validate the whole area
+before returning a tuple. In eager mode a malformed later record cannot leave a
+caller with a partial result. Filesystem errors remain filesystem errors;
+damaged data and decoding errors raise `ParserException` with source path, byte
+offset and a chained cause.
 
 The standalone `JamReader` requires a stable area with no concurrent writes. It
 does not lock the area or produce a snapshot across the three files. Stop the
@@ -75,7 +76,10 @@ when repeated. Header MSGID/REPLYID take precedence over matching body IDs;
 missing MSGID uses the core synthetic ID over decoded, normalized fields.
 
 Dates are naive `1970-01-01 + DateWritten seconds`, independent of the machine's
-timezone; zero means `None`. TZUTC is retained as a control line. Raw attributes,
+timezone; zero means `None`. TZUTC is retained as a control line. Writer and
+recovery sessions invert that epoch to local wall time when a valid TZUTC offset
+is present, so aware timestamps round-trip without an hour shift. The naive
+DateWritten mapping is unchanged when TZUTC is absent. Raw attributes,
 all three reply links and `.JHR` provenance are retained; zero reply links become
 `None`. Unknown area metadata stays `None`.
 
@@ -96,10 +100,9 @@ uv run twine check dist/*
 uv run python scripts/verify_distribution.py
 ```
 
-uv uses the sibling `../golded-ftn-python` checkout during development. Published metadata
-contains only `golded-ftn>=1.2.0,<2`. The sdist build hook removes `tool.uv.sources`
-from the packed `pyproject.toml`; the development lock is also excluded.
-Unpacked sources use the public dependency constraint.
+Development and distribution use public dependency constraints; no local source
+overrides are configured. Install unpublished dependencies from the reviewed
+candidate wheelhouse.
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [release checks](docs/release.md).
 
 ## Format references and credits
@@ -144,7 +147,10 @@ decoding failures are skipped; there is no lossy decoding or mojibake repair.
 ## Writing
 
 `JamWriter.create(base)` creates `.JHR`, `.JDT`, `.JDX` and an empty `.JLR`.
-Existing files are refused. The initial message number is 1.
+Pass `JamWriterOptions(extension_case="lower")` to create `.jhr` and friends
+instead. Open and read already use the casing that is on disk; both casings
+of the same sidecar at once are still rejected. Existing files are refused.
+The initial message number is 1.
 
 ```python
 from golded_ftn import MessagePatch, OutgoingMessage
@@ -193,13 +199,31 @@ No MSGID, routing or duplicate detection is generated. Full-file snapshots suppo
 in-place rollback during ordinary I/O failures; rollback failure poisons the session.
 This provides no process-kill or power-loss transaction guarantee.
 
-GoldED coexistence is disabled on every platform (`concurrent=True` is refused).
-macOS/Linux use POSIX record locking. Core provides Windows offline record locks
-and I/O. CI passed on Windows and macOS with Python 3.12/3.14 and Linux
-with Python 3.12/3.13/3.14. Version 1.2.1 opens JDT/JDX descriptors in binary
-mode on Windows. GoldED interoperability remains unverified. Keep GoldED closed and
-avoid direct file access while these sessions operate. GoldED builds and
-integration tests are deferred.
+`JamWriter.recovery_session(path, recovery_root=...)` holds the `.JHR` byte-0 lock
+across prepare/apply/settle and reuses that descriptor for header I/O. Recovery
+covers `.JHR`, `.JDT` and `.JDX` only; `.JLR` is never touched. Torn header or
+index bytes are restored from durable artifacts before ordinary validation.
+`concurrent=True` is accepted.
+
+## GoldED compatibility profile
+
+Candidate interoperability is bounded to GoldED source commit `d7449053bd674df54c4a442c92dce8c06ad7b586`,
+version 3.1.0, native macOS arm64/GCC 16 and Ubuntu 24.04 aarch64/GCC 13.
+The suite release manifest pins the resulting binaries and records actual checks.
+Other GoldED versions, Windows and network filesystems are not qualified.
+
+Writers default to offline operation. Explicit `concurrent=True` opts into the
+tested read/write/refresh/lastread/stale-save profile, not a general multiwriter
+guarantee. Standalone readers still need a stable base; a session read uses its
+format lock. MSG/Opus and Goldbase have no shared GoldED writer lock: stale-save
+detection cannot close a race between comparison and a foreign write. Keep
+same-message edits serialized. Goldbase is outside the Python C1 profile.
+
+Use format-specific WriterOptions extension_case="lower" for newly created
+Unix bases used by GoldED; preserve existing casing and reject ambiguous twins.
+Hudson scan queues belong in the configured system directory. Recovery sessions
+have a durable journal protocol; ordinary open() sessions only roll back handled
+I/O failures. UNKNOWN outcomes retain artifacts for operator reconciliation.
 
 ### Original-source evidence
 
@@ -213,3 +237,10 @@ REPLY CRCs, active count and modification counter. Its CRC seed and missing fina
 complement are confirmed by `goldlib/gall/gcrcs32.cpp::strCrc32`.
 These source checks establish layout and write semantics. They do not establish
 that a running GoldED reader refreshes safely after external changes.
+
+## Candidate 1.3.0
+
+Add recoverable sessions and explicit extension_case. Retain the JHR lock descriptor across reads and mutations; preserve raw metadata and revisions.
+
+Linux and macOS, Python 3.12–3.14, are the release targets. Windows is outside
+this candidate's test and compatibility promises. See [release preparation](docs/release.md).

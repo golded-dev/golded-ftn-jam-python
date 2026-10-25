@@ -13,7 +13,6 @@ from golded_ftn import (
     OutgoingMessage,
     ParserException,
     RollbackError,
-    UnsupportedOperationError,
     WriterError,
     WriterOptions,
 )
@@ -209,7 +208,9 @@ def test_rollback_failure_poisons_session(tmp_path: Path) -> None:
 
     with writer.open(base) as session:
         session._io = BrokenIO()
-        with pytest.raises(RollbackError, match="append.*rollback"):
+        with pytest.raises(
+            RollbackError, match="Transaction rollback failed during append"
+        ):
             session.append(message())
         with pytest.raises(WriterError, match="unusable"):
             session.read(1)
@@ -219,8 +220,8 @@ def test_validation_and_sessions(tmp_path: Path) -> None:
     base = tmp_path / "area"
     writer = JamWriter()
     writer.create(base)
-    with pytest.raises(UnsupportedOperationError):
-        writer.open(base, WriterOptions(concurrent=True))
+    with writer.open(base, WriterOptions(concurrent=True)) as concurrent:
+        assert concurrent.options.concurrent is True
     with writer.open(base) as left, writer.open(base) as right:
         first = left.append(message())
         second = right.append(message())
