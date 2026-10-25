@@ -114,13 +114,25 @@ def patch(base: Path, suffix: str, offset: int, data: bytes) -> None:
 
 def failure(base: Path, suffix: str, offset: int) -> ParserException:
     with pytest.raises(ParserException) as caught:
-        # The read itself must fail before an iterable can escape.
-        JamReader().read(base)
+        # Eager mode validates the whole area before any message escapes.
+        JamReader().read(base, ReaderOptions(eager=True))
     error = caught.value
     assert str(base) + suffix in str(error)
     assert f"offset {offset}" in str(error)
     assert isinstance(error.__cause__, (ValueError, LookupError))
     return error
+
+
+def test_streaming_default_yields_without_eager_tuple(tmp_path: Path) -> None:
+    messages = JamReader().read(one(tmp_path, body=b"hello"))
+    assert not isinstance(messages, tuple)
+    assert [item.body_text for item in messages] == ["hello"]
+
+
+def test_eager_returns_tuple(tmp_path: Path) -> None:
+    messages = JamReader().read(one(tmp_path, body=b"hello"), ReaderOptions(eager=True))
+    assert isinstance(messages, tuple)
+    assert messages[0].body_text == "hello"
 
 
 def test_empty_and_public_exports(tmp_path: Path) -> None:

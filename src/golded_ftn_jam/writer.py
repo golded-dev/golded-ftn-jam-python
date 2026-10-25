@@ -193,7 +193,8 @@ def _raw_fields(raw: bytes) -> list[tuple[int, int, bytes]]:
 
 def _address(value: object) -> None:
     if isinstance(value, FtnAddress):
-        for part in (value.zone, value.net, value.node, value.point or 0):
+        zone = 0 if value.zone is None else value.zone
+        for part in (zone, value.net, value.node, value.point or 0):
             if not 0 <= part <= 65535:
                 raise ValueError("FTN address component exceeds unsigned 16-bit range")
         if value.domain is not None and not re.fullmatch(

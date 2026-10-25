@@ -5,12 +5,12 @@ import errno
 import re
 import stat
 import struct
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import replace
 from datetime import datetime, timedelta
 from os import PathLike
 from pathlib import Path
-from typing import Literal, NoReturn
+from typing import BinaryIO, Literal, NoReturn
 
 from golded_ftn import (
     MessageControlLines,
@@ -61,6 +61,18 @@ def _slice(data: bytes, offset: int, length: int, path: Path) -> bytes:
         f"Range of {length} bytes is outside file of {len(data)} bytes",
     )
     return data[offset : offset + length]
+
+
+def _read_at(handle: BinaryIO, offset: int, length: int, path: Path) -> bytes:
+    handle.seek(offset)
+    data = handle.read(length)
+    _require(
+        len(data) == length,
+        path,
+        offset,
+        f"Range of {length} bytes is outside file",
+    )
+    return data
 
 
 def _file(base: Path, suffix: str) -> Path:
@@ -130,24 +142,38 @@ def _error_issue(
 
 
 def _subfields(
-    data: bytes, start: int, length: int, path: Path, options: ReaderOptions, msgno: int
+    data: bytes,
+    start: int,
+    length: int,
+    path: Path,
+    options: ReaderOptions,
+    msgno: int,
+    *,
+    absolute_start: int | None = None,
 ) -> list[tuple[int, bytes, int]]:
     end = start + length
     _slice(data, start, length, path)
     result: list[tuple[int, bytes, int]] = []
     offset = start
+    origin = absolute_start if absolute_start is not None else start
+
+    def _at(local: int) -> int:
+        return origin + (local - start)
+
     while offset < end:
-        _require(end - offset >= 8, path, offset, "Truncated subfield header")
+        _require(end - offset >= 8, path, _at(offset), "Truncated subfield header")
         lo, hi, size = _SUBFIELD.unpack_from(data, offset)
         payload = offset + 8
-        _require(size <= end - payload, path, offset, "Subfield exceeds declared block")
+        _require(
+            size <= end - payload, path, _at(offset), "Subfield exceeds declared block"
+        )
         if hi == 0 and lo in _KNOWN:
             maximum = 100 if lo <= 6 else 40 if lo == 7 else 255 if lo == 2000 else None
             if maximum is not None and size > maximum and options.archive_mode:
                 _report(
                     options,
                     path,
-                    offset,
+                    _at(offset),
                     msgno,
                     "recovered",
                     "subfield_length_exceeded",
@@ -156,7 +182,7 @@ def _subfields(
             _require(
                 options.archive_mode or maximum is None or size <= maximum,
                 path,
-                offset,
+                _at(offset),
                 f"Subfield {lo} exceeds specification maximum length",
             )
             if lo == 2004:
@@ -168,7 +194,7 @@ def _subfields(
                     _report(
                         options,
                         path,
-                        payload,
+                        _at(payload),
                         msgno,
                         "recovered",
                         "invalid_tzutc",
@@ -179,10 +205,10 @@ def _subfields(
                     or re.fullmatch(rb"[+-]?[0-9]{4}", data[payload : payload + size])
                     is not None,
                     path,
-                    payload,
+                    _at(payload),
                     "Invalid TZUTCINFO",
                 )
-            result.append((lo, data[payload : payload + size], payload))
+            result.append((lo, data[payload : payload + size], _at(payload)))
         offset = payload + size
     return result
 
@@ -289,29 +315,95 @@ def _unique_controls(controls: MessageControlLines, path: Path, offset: int) -> 
 
 
 class JamReader:
-    """Validate all indexed records before returning messages in number order.
+    """Read indexed JAM revision 1 messages in number order.
 
-    The files must be stable; reading them separately does not create a snapshot.
+    Default streaming reads the index then seeks each header/body. Pass
+    ``ReaderOptions(eager=True)`` to load the area files and validate every
+    indexed record before any message is returned. The files must be stable;
+    reading them separately does not create a snapshot.
     """
 
     def read(
         self, path: str | PathLike[str], options: ReaderOptions | None = None
     ) -> Iterable[ParsedMessage]:
         options = options or ReaderOptions()
-        base = Path(path)
+        if options.eager:
+            return self._read_eager(Path(path), options)
+        return self._read_stream(Path(path), options)
+
+    def _read_eager(
+        self, base: Path, options: ReaderOptions
+    ) -> tuple[ParsedMessage, ...]:
+        opened = self._open(base, options)
+        if opened is None:
+            return ()
+        jhr, jdt, jdx, base_number, index = opened
+        headers, texts = jhr.read_bytes(), jdt.read_bytes()
+        try:
+            _slice(headers, 0, 1024, jhr)
+            _require(headers[:4] == b"JAM\0", jhr, 0, "Invalid area signature")
+        except ParserException as error:
+            if not options.archive_mode:
+                raise
+            _error_issue(options, error, jhr, 0, None, "stopped")
+            return ()
+        return tuple(
+            self._iter_messages(
+                options,
+                jhr,
+                jdt,
+                jdx,
+                base_number,
+                index,
+                headers=headers,
+                texts=texts,
+            )
+        )
+
+    def _read_stream(
+        self, base: Path, options: ReaderOptions
+    ) -> Iterator[ParsedMessage]:
+        opened = self._open(base, options)
+        if opened is None:
+            return
+        jhr, jdt, jdx, base_number, index = opened
+        with jhr.open("rb") as headers_file, jdt.open("rb") as texts_file:
+            header = _read_at(headers_file, 0, 1024, jhr)
+            try:
+                _require(header[:4] == b"JAM\0", jhr, 0, "Invalid area signature")
+            except ParserException as error:
+                if not options.archive_mode:
+                    raise
+                _error_issue(options, error, jhr, 0, None, "stopped")
+                return
+            yield from self._iter_messages(
+                options,
+                jhr,
+                jdt,
+                jdx,
+                base_number,
+                index,
+                headers_file=headers_file,
+                texts_file=texts_file,
+            )
+
+    def _open(
+        self, base: Path, options: ReaderOptions
+    ) -> tuple[Path, Path, Path, int, bytes] | None:
         try:
             jhr, jdt, jdx = (_file(base, suffix) for suffix in (".JHR", ".JDT", ".JDX"))
         except ParserException as error:
             if not options.archive_mode:
                 raise
             _error_issue(options, error, base, 0, None, "stopped")
-            return ()
-        headers, texts, index = jhr.read_bytes(), jdt.read_bytes(), jdx.read_bytes()
+            return None
         try:
-            _slice(headers, 0, 1024, jhr)
-            _require(headers[:4] == b"JAM\0", jhr, 0, "Invalid area signature")
-            base_number = int.from_bytes(headers[20:24], "little")
+            with jhr.open("rb") as handle:
+                header = _read_at(handle, 0, 1024, jhr)
+            _require(header[:4] == b"JAM\0", jhr, 0, "Invalid area signature")
+            base_number = int.from_bytes(header[20:24], "little")
             _require(base_number >= 1, jhr, 20, "BaseMsgNum must be positive")
+            index = jdx.read_bytes()
             _require(
                 len(index) % 8 == 0, jdx, len(index) // 8 * 8, "Truncated index record"
             )
@@ -325,9 +417,24 @@ class JamReader:
             if not options.archive_mode:
                 raise
             _error_issue(options, error, jhr, 0, None, "stopped")
-            return ()
+            return None
+        return jhr, jdt, jdx, base_number, index
+
+    def _iter_messages(
+        self,
+        options: ReaderOptions,
+        jhr: Path,
+        jdt: Path,
+        jdx: Path,
+        base_number: int,
+        index: bytes,
+        *,
+        headers: bytes | None = None,
+        texts: bytes | None = None,
+        headers_file: BinaryIO | None = None,
+        texts_file: BinaryIO | None = None,
+    ) -> Iterator[ParsedMessage]:
         used: set[int] = set()
-        result: list[ParsedMessage] = []
         for position in range(len(index) // 8):
             crc, offset = _INDEX.unpack_from(index, position * 8)
             if crc == offset == 0xFFFFFFFF:
@@ -353,16 +460,28 @@ class JamReader:
                 else options
             )
             failure: ParserException | None = None
+            message: ParsedMessage | None = None
             try:
                 _require(offset >= 1024, jhr, offset, "Header points into area header")
-                message = self._message(
-                    headers, texts, jhr, jdt, offset, msgno, local_options
-                )
+                if headers is not None and texts is not None:
+                    message = self._message(
+                        headers, texts, jhr, jdt, offset, msgno, local_options
+                    )
+                else:
+                    assert headers_file is not None and texts_file is not None
+                    message = self._message_at(
+                        headers_file,
+                        texts_file,
+                        jhr,
+                        jdt,
+                        offset,
+                        msgno,
+                        local_options,
+                    )
             except ParserException as error:
                 if not options.archive_mode:
                     raise
                 failure = error
-                message = None
             # Flush outside parser catches so a failing reporter aborts the read.
             for issue in pending:
                 assert options.on_issue is not None
@@ -370,8 +489,35 @@ class JamReader:
             if failure is not None:
                 _error_issue(options, failure, jhr, offset, msgno, "skipped")
             if message is not None:
-                result.append(message)
-        return tuple(result)
+                yield message
+
+    def _message_at(
+        self,
+        headers_file: BinaryIO,
+        texts_file: BinaryIO,
+        jhr: Path,
+        jdt: Path,
+        offset: int,
+        msgno: int,
+        options: ReaderOptions,
+    ) -> ParsedMessage | None:
+        fixed = _read_at(headers_file, offset, 76, jhr)
+        words = _HEADER.unpack(fixed)[3:]
+        record = fixed + _read_at(headers_file, offset + 76, words[0], jhr)
+        text_offset, text_length = words[13], words[14]
+        body = _read_at(texts_file, text_offset, text_length, jdt)
+        return self._message(
+            record,
+            body,
+            jhr,
+            jdt,
+            0,
+            msgno,
+            options,
+            provenance_offset=offset,
+            text_offset=0,
+            text_length=text_length,
+        )
 
     @staticmethod
     def _message(
@@ -382,27 +528,44 @@ class JamReader:
         offset: int,
         msgno: int,
         options: ReaderOptions,
+        *,
+        provenance_offset: int | None = None,
+        text_offset: int | None = None,
+        text_length: int | None = None,
     ) -> ParsedMessage | None:
+        physical = provenance_offset if provenance_offset is not None else offset
         fixed = _HEADER.unpack(_slice(headers, offset, 76, jhr))
         signature, revision, _reserved, *words = fixed
-        _require(signature == b"JAM\0", jhr, offset, "Invalid message signature")
-        _require(revision == 1, jhr, offset + 4, "Unsupported message revision")
+        _require(signature == b"JAM\0", jhr, physical, "Invalid message signature")
+        _require(revision == 1, jhr, physical + 4, "Unsupported message revision")
         _require(
-            words[10] == msgno, jhr, offset + 48, "Message number disagrees with index"
+            words[10] == msgno,
+            jhr,
+            physical + 48,
+            "Message number disagrees with index",
         )
-        fields = _subfields(headers, offset + 76, words[0], jhr, options, msgno)
-        text_offset, text_length = words[13:15]
-        raw_body = _slice(texts, text_offset, text_length, jdt)
+        fields = _subfields(
+            headers,
+            offset + 76,
+            words[0],
+            jhr,
+            options,
+            msgno,
+            absolute_start=physical + 76,
+        )
+        body_offset = words[13] if text_offset is None else text_offset
+        body_length = words[14] if text_length is None else text_length
+        raw_body = _slice(texts, body_offset, body_length, jdt)
         attributes = words[11]
         if attributes & _DELETED:
             return None
         _require(
             not attributes & _UNSUPPORTED,
             jhr,
-            offset + 52,
+            physical + 52,
             "Encrypted, compressed or escaped messages are unsupported",
         )
-        charset = _charset(fields, raw_body, options, jhr, jdt, text_offset)
+        charset = _charset(fields, raw_body, options, jhr, jdt, words[13])
         values: dict[int, str] = {}
         control_text: list[str] = []
         for lo, raw, payload_offset in fields:
@@ -430,17 +593,18 @@ class JamReader:
                 values[lo] = value
             if lo in _CONTROL_NAMES or lo in {2000, 2001, 2002}:
                 control_text.append(_control(lo, value))
-        body = parse_body(_decode(raw_body, charset, jdt, text_offset, options, msgno))
+        body_report = words[13]
+        body = parse_body(_decode(raw_body, charset, jdt, body_report, options, msgno))
         header_controls = parse_message("\n".join(control_text))
         body_controls = parse_message(body)
-        _unique_controls(header_controls, jhr, offset + 76)
-        _unique_controls(body_controls, jdt, text_offset)
+        _unique_controls(header_controls, jhr, physical + 76)
+        _unique_controls(body_controls, jdt, body_report)
         for name in ("msgid", "reply"):
             a, b = getattr(header_controls, name), getattr(body_controls, name)
             _require(
                 a is None or b is None or a == b,
                 jdt,
-                text_offset,
+                body_report,
                 f"Header and body {name} disagree",
             )
         controls = replace(
@@ -484,6 +648,6 @@ class JamReader:
                 source_type="jam",
                 source_path=str(jhr),
                 source_id=str(msgno),
-                source_offset=offset,
+                source_offset=physical,
             ),
         )

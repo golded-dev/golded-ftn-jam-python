@@ -17,7 +17,7 @@ def test_archive_keeps_bounded_oversize_subfield(
 ) -> None:
     base = one(tmp_path, subfield(lo, b"x" * size))
     with pytest.raises(ParserException):
-        JamReader().read(base)
+        JamReader().read(base, ReaderOptions(eager=True))
     issues: list[ReaderIssue] = []
     messages = list(JamReader().read(base, options(issues)))
     assert len(messages) == 1
@@ -80,13 +80,13 @@ def test_reporter_failure_propagates(tmp_path: Path) -> None:
         raise RuntimeError("report unavailable")
 
     with pytest.raises(RuntimeError, match="report unavailable"):
-        JamReader().read(base, ReaderOptions(archive_mode=True, on_issue=fail))
+        list(JamReader().read(base, ReaderOptions(archive_mode=True, on_issue=fail)))
 
 
 def test_archive_preserves_distinct_pid_controls(tmp_path: Path) -> None:
     base = one(tmp_path, subfield(7, b"First tool") + subfield(7, b"Second tool"))
     with pytest.raises(ParserException):
-        JamReader().read(base)
+        JamReader().read(base, ReaderOptions(eager=True))
     issues: list[ReaderIssue] = []
     message = list(JamReader().read(base, options(issues)))[0]
     assert message.control_lines is not None
