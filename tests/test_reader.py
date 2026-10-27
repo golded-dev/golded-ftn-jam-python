@@ -400,7 +400,7 @@ def test_text_metadata_and_provenance(tmp_path: Path, encoding: str) -> None:
         ("MSGID", "2:230/0 abc"),
         ("REPLY", "parent"),
     ]
-    assert message.area_code is None
+    assert message.area is None
     assert message.area_name is None
     assert message.area_sort_order is None
     assert message.area_meta_key is None
