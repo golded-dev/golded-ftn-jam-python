@@ -27,6 +27,6 @@ jobs:
         run: |
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern RELEASE-SHA256.txt
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.whl' --pattern '*.tar.gz' --dir dist
-          sha256sum --check RELEASE-SHA256.txt
+          (cd dist && sha256sum --check ../RELEASE-SHA256.txt)
       - name: Publish to PyPI with Trusted Publishing
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
