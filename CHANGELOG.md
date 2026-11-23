@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.1 — 2026-11-23
+
+- Recognize body charset kludges only at the start of a logical line. Keep
+  quoted kludges as message text in both strict and archive reads.
+
 ## 1.3.0 — 2026-10-25
 
 - Add recoverable sessions and explicit `extension_case` handling.

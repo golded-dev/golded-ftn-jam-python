@@ -279,7 +279,7 @@ def _charset(
     except (ValueError, LookupError) as error:
         _fail(jhr, 0, error)
     for raw, path, offset, is_subfield in declarations:
-        prefix = rb"(?:^|\x01)" if is_subfield else rb"\x01"
+        prefix = rb"(?:^|\x01)" if is_subfield else rb"(?:\A|(?<=[\r\n]))\x01"
         for match in re.finditer(
             prefix + rb"(?:CHRS|CHARSET):\s*([^\s\x00\x01]+)", raw, re.IGNORECASE
         ):

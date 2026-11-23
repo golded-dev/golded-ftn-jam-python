@@ -2,12 +2,12 @@
 
 Repository: [`golded-ftn-jam-python`](https://github.com/golded-dev/golded-ftn-jam-python).
 The distribution remains `golded-ftn-jam`; imports use `golded_ftn_jam`.
-The source is public on GitHub. [Version 1.3.0 is available on PyPI](https://pypi.org/project/golded-ftn-jam/1.3.0/).
+The source is public on GitHub. [Package on PyPI](https://pypi.org/project/golded-ftn-jam/).
 
 Install with Python 3.12 or newer:
 
 ```sh
-python -m pip install golded-ftn-jam==1.3.0
+python -m pip install golded-ftn-jam==1.3.1
 ```
 
 Read and edit JAM revision 1 areas through the `golded-ftn` models. Python 3.12+.
@@ -62,7 +62,9 @@ does not lock the area or produce a snapshot across the three files. Stop the
 writer or use a consistent copy before reading.
 
 Decoding is strict, with core charset detection and CP850 fallback. Header
-FTSKLUDGE declarations are considered before body declarations. Conflicting
+FTSKLUDGE declarations are considered before body declarations. A body
+charset kludge starts at the beginning of the body or immediately after CR or
+LF. Quoted charset kludges stay in the message text. Conflicting
 charset declarations and IDs fail. Unknown charset names use the configured
 fallback. Mojibake repair is the caller's choice.
 

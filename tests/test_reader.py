@@ -11,6 +11,7 @@ from golded_ftn import (
     MessageBaseReader,
     ParsedMessage,
     ParserException,
+    ReaderIssue,
     ReaderOptions,
     synthetic_id,
 )
@@ -466,6 +467,8 @@ def test_conflicting_ids(
             1129,
         ),
         (b"", b"\x01CHRS: UTF-8 4\r\x01CHARSET: CP850", ".JDT", 15),
+        (b"", b"\x01CHRS: UTF-8 4\n\x01CHARSET: CP850", ".JDT", 15),
+        (b"", b"\x01CHRS: UTF-8 4\r\n\x01CHARSET: CP850", ".JDT", 16),
         (subfield(2000, b"CHRS: UNKNOWN"), b"\x01CHRS: DIFFERENT", ".JDT", 0),
     ],
 )
@@ -620,3 +623,20 @@ def test_charset_conflict_offset_with_leading_soh(tmp_path: Path) -> None:
     first = subfield(2000, b"CHRS: UTF-8 4")
     second = subfield(2000, b"\x01\x01CHARSET: CP850")
     failure(one(tmp_path, first + second), ".JHR", 1108 + len(first) + 1)
+
+
+@pytest.mark.parametrize("separator", [b"\r", b"\n", b"\r\n"])
+@pytest.mark.parametrize("archive_mode", [False, True])
+def test_quoted_charset_is_message_text(
+    tmp_path: Path, separator: bytes, archive_mode: bool
+) -> None:
+    fields = subfield(2000, b"CHRS: IBMPC 2")
+    quoted = b"<\x01CHRS: LATIN-1 2"
+    body = separator.join(("Blå".encode("cp850"), quoted, "følge".encode("cp850")))
+    issues: list[ReaderIssue] = []
+    options = ReaderOptions(archive_mode=archive_mode, on_issue=issues.append)
+    (message,) = read(one(tmp_path, fields, body), options)
+    assert message.body_text == "Blå\n<\x01CHRS: LATIN-1 2\nfølge"
+    assert message.control_lines is not None
+    assert message.control_lines.charset == "IBMPC 2"
+    assert issues == []
